@@ -1,0 +1,28 @@
+name: secure_archive_app
+description: "A new Flutter project."
+publish_to: 'none'
+version: 0.1.0
+resolution: workspace
+
+environment:
+  sdk: ^3.10.3
+
+dependencies:
+  cryptography_flutter: ^2.3.4
+  fancy_password_field: ^2.0.8
+  file_picker: ^10.3.7
+  flutter:
+    sdk: flutter
+  flutter_hooks: ^0.21.3+1
+  flutter_material_design_icons: ^1.1.7447
+  intl: ^0.20.2
+  path: ^1.9.1
+  secure_archive:
+    path: ../../packages/secure_archive
+  window_manager: ^0.5.1
+
+dev_dependencies:
+  lint: ^2.8.0
+
+flutter:
+  uses-material-design: true
