@@ -20,13 +20,44 @@ const _defaultMode = 420; // 644₈
 /// Mask for executable bits in file modes.
 const _executableMask = 0x49; // 001 001 001
 
+bool _isWithinOrEqual(String root, String path) {
+  return p.isWithin(root, path) || p.equals(root, path);
+}
+
+void _ensureCanonicalPathWithinDestination(
+  String destination,
+  String path,
+  String entryName,
+) {
+  final canonicalPath = canonicalize(path);
+  if (_isWithinOrEqual(destination, canonicalPath)) {
+    return;
+  }
+
+  throw FormatException('Invalid tar entry: `$entryName`');
+}
+
 Stream<File> listDirectoryFilesRelative(
   Directory root, {
   required bool recursive,
   required bool ignoreHidden,
 }) async* {
-  await for (final entry in root.list(recursive: recursive)) {
-    if (entry is! File) continue;
+  await for (final entry in root.list(
+    recursive: recursive,
+    followLinks: false,
+  )) {
+    if (entry is Link) {
+      try {
+        final type = await FileSystemEntity.type(entry.path);
+        if (type != FileSystemEntityType.file) {
+          continue;
+        }
+      } on FileSystemException {
+        continue;
+      }
+    } else if (entry is! File) {
+      continue;
+    }
 
     final relativePath = p.relative(entry.path, from: root.path);
 
@@ -53,10 +84,11 @@ Stream<TarEntry> findFileEntries(
     try {
       final file = File(p.join(root.path, relativeFile.path));
       final stat = await file.stat();
+      final entryName = p.posix.joinAll(p.split(relativeFile.path));
 
       yield TarEntry(
         TarHeader(
-          name: relativeFile.path,
+          name: entryName,
           typeFlag: TypeFlag.reg, // It's a regular file
           // Apart from that, copy over meta information
           mode: stat.mode,
@@ -73,8 +105,9 @@ Stream<TarEntry> findFileEntries(
         // writer will use later.
         file.openRead(),
       );
-    } catch (e) {
-      // File was deleted or became inaccessible - skip it
+    } on FileSystemException {
+      // Files can disappear or become unreadable while a live directory is
+      // being archived. Skip those races and keep the rest of the archive.
       continue;
     }
   }
@@ -164,7 +197,7 @@ Future<void> extractTar(Stream<List<int>> stream, String destination) async {
     final parentDirectory = p.dirname(filePath);
 
     bool checkValidTarget(String linkTarget) {
-      final isValid = p.isWithin(destination, linkTarget);
+      final isValid = _isWithinOrEqual(destination, canonicalize(linkTarget));
       if (!isValid) {
         // log.fine('Skipping ${entry.name}: Invalid link target');
       }
@@ -174,10 +207,22 @@ Future<void> extractTar(Stream<List<int>> stream, String destination) async {
 
     switch (entry.type) {
       case TypeFlag.dir:
+        _ensureCanonicalPathWithinDestination(
+          destination,
+          filePath,
+          entry.name,
+        );
+        deleteIfLink(filePath);
         ensureDir(filePath);
+        continue;
       case TypeFlag.reg:
       case TypeFlag.regA:
         // Regular file
+        _ensureCanonicalPathWithinDestination(
+          destination,
+          parentDirectory,
+          entry.name,
+        );
         deleteIfLink(filePath);
         ensureDir(parentDirectory);
         await createFileFromStream(_descriptorPool, entry.contents, filePath);
@@ -191,8 +236,14 @@ Future<void> extractTar(Stream<List<int>> stream, String destination) async {
             chmod(mode, filePath);
           }
         }
+        continue;
       case TypeFlag.symlink:
         // Link to another file in this tar, relative from this entry.
+        _ensureCanonicalPathWithinDestination(
+          destination,
+          parentDirectory,
+          entry.name,
+        );
         final resolvedTarget = p.joinAll([
           parentDirectory,
           ...p.posix.split(entry.header.linkName!),
@@ -203,14 +254,21 @@ Future<void> extractTar(Stream<List<int>> stream, String destination) async {
         }
 
         ensureDir(parentDirectory);
+        deleteIfLink(filePath);
         createSymlink(
           p.relative(resolvedTarget, from: parentDirectory),
           filePath,
         );
+        continue;
       case TypeFlag.link:
         // We generate hardlinks as symlinks too, but their linkName is relative
         // to the root of the tar file (unlike symlink entries, whose linkName
         // is relative to the entry itself).
+        _ensureCanonicalPathWithinDestination(
+          destination,
+          parentDirectory,
+          entry.name,
+        );
         final fromDestination = p.join(destination, entry.header.linkName);
         if (!checkValidTarget(fromDestination)) {
           break; // Link points outside of the tar file.
@@ -218,7 +276,9 @@ Future<void> extractTar(Stream<List<int>> stream, String destination) async {
 
         final fromFile = p.relative(fromDestination, from: parentDirectory);
         ensureDir(parentDirectory);
+        deleteIfLink(filePath);
         createSymlink(fromFile, filePath);
+        continue;
       default:
         // Only extract files
         continue;

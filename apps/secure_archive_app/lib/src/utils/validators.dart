@@ -15,11 +15,13 @@ String? validatePath(String? value) {
     return 'Path cannot be empty';
   }
 
-  // Check for invalid characters
-  // ignore: unnecessary_raw_strings
-  final invalidChars = RegExp(r'[<>"|?*]');
-  if (invalidChars.hasMatch(value)) {
-    return 'Path contains invalid characters';
+  if (Platform.isWindows) {
+    // Windows reserves these characters in path segments.
+    // ignore: unnecessary_raw_strings
+    final invalidChars = RegExp(r'[<>"|?*]');
+    if (invalidChars.hasMatch(value)) {
+      return 'Path contains invalid characters';
+    }
   }
 
   // Validate path structure

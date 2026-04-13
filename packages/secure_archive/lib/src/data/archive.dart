@@ -160,6 +160,16 @@ Future<void> unarchive({
       }
 
       final decryptController = StreamController<List<int>>();
+      Future<void>? extractFuture;
+
+      Future<void> waitForExtract() async {
+        if (extractFuture == null) {
+          return;
+        }
+
+        await extractFuture;
+      }
+
       try {
         final decryptStream = decryptChacha20(
           secretKey: secretKey,
@@ -168,7 +178,7 @@ Future<void> unarchive({
           inputStream: inputFile.openRead(),
         );
 
-        final extractFuture = extractTar(
+        extractFuture = extractTar(
           decryptController.stream.transform(gzip.decoder),
           tempDir.path,
         );
@@ -178,14 +188,26 @@ Future<void> unarchive({
         }
 
         await decryptController.close();
-        await extractFuture;
+        await waitForExtract();
       } on SecretBoxAuthenticationError {
         await decryptController.close();
+        try {
+          await waitForExtract();
+        } catch (_) {
+          // Authentication failure is the actionable error for callers.
+        }
+
         throw Exception(
           'Authentication failed for part $currentPart: wrong password or corrupted data',
         );
       } catch (e) {
         await decryptController.close();
+        try {
+          await waitForExtract();
+        } catch (_) {
+          // Preserve the original extraction failure below.
+        }
+
         throw Exception('Failed to extract part $currentPart: $e');
       }
     }

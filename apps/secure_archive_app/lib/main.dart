@@ -53,6 +53,16 @@ class _BackupPage extends HookWidget {
     final backupFuture = useState<Future<void>?>(null);
     final backupState = useFuture(backupFuture.value);
 
+    useEffect(() {
+      if (backupState.hasError) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          showErrorMessage(context, backupState.error!.toString());
+        });
+      }
+
+      return null;
+    }, [backupState.hasError, backupState.error]);
+
     final disableInteraction =
         backupState.connectionState == ConnectionState.waiting;
 

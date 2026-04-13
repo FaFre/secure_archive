@@ -1,4 +1,6 @@
 import 'dart:io';
+
+import 'package:path/path.dart' as p;
 import 'package:secure_archive/src/data/archive.dart';
 import 'package:secure_archive/src/data/argon2_params.dart';
 import 'package:secure_archive/src/data/models/archive_metadata.dart';
@@ -173,46 +175,56 @@ class SecureArchivePack {
     int softChunkLimit = 100 * 1024 * 1024,
     bool ignoreHidden = false,
   }) async {
-    await withIntermediateDirectory((intermediateDir) async {
-      final metadata = await compute(
-        _archiveInIsolate,
-        _PackParams(
-          sourceDirPath: sourceDirectory.path,
-          intermediateDirPath: intermediateDir.path,
+    await withIntermediateDirectory((stagingDir) async {
+      final stagedOutput = File(p.join(stagingDir.path, 'archive.sa'));
+
+      await withIntermediateDirectory((intermediateDir) async {
+        final metadata = await compute(
+          _archiveInIsolate,
+          _PackParams(
+            sourceDirPath: sourceDirectory.path,
+            intermediateDirPath: intermediateDir.path,
+            argon2Params: argon2Params,
+            password: password,
+            softChunkLimit: softChunkLimit,
+            ignoreHidden: ignoreHidden,
+          ),
+        );
+
+        final createdFiles = await intermediateDir.list().length;
+        if (createdFiles != metadata.parts.length + 1) {
+          throw Exception('Corrupt output');
+        }
+
+        await compute(
+          _createTarInIsolate,
+          _TarParams(
+            intermediateDirPath: intermediateDir.path,
+            outputFilePath: stagedOutput.path,
+            ignoreHidden: ignoreHidden,
+          ),
+        );
+      });
+
+      if (integrityCheck) {
+        final archiveIntegrity = SecureArchiveIntegrity(
+          archiveFile: stagedOutput,
+          sourceDirectory: sourceDirectory,
           argon2Params: argon2Params,
-          password: password,
-          softChunkLimit: softChunkLimit,
-          ignoreHidden: ignoreHidden,
-        ),
-      );
+        );
 
-      final createdFiles = await intermediateDir.list().length;
-      if (createdFiles != metadata.parts.length + 1) {
-        throw Exception('Corrupt output');
+        final result = await archiveIntegrity.checkIntegrity(
+          password,
+          ignoreHidden: ignoreHidden,
+        );
+        if (!result) {
+          throw Exception('Could not validate backup integrity');
+        }
       }
 
-      await compute(
-        _createTarInIsolate,
-        _TarParams(
-          intermediateDirPath: intermediateDir.path,
-          outputFilePath: outputFile.path,
-          ignoreHidden: ignoreHidden,
-        ),
-      );
+      await outputFile.parent.create(recursive: true);
+      await stagedOutput.copy(outputFile.path);
     });
-
-    if (integrityCheck) {
-      final archiveIntegrity = SecureArchiveIntegrity(
-        archiveFile: outputFile,
-        sourceDirectory: sourceDirectory,
-        argon2Params: argon2Params,
-      );
-
-      final result = await archiveIntegrity.checkIntegrity(password);
-      if (!result) {
-        throw Exception('Could not validate backup integrity');
-      }
-    }
   }
 }
 
