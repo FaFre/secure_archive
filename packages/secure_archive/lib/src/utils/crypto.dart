@@ -41,6 +41,7 @@ Stream<List<int>> encryptChacha20({
   required List<int> nonce,
   required Stream<List<int>> inputStream,
   required void Function(Mac) onMac,
+  List<int> aad = const [],
 }) {
   final cipher = Chacha20.poly1305Aead();
 
@@ -51,6 +52,7 @@ Stream<List<int>> encryptChacha20({
     secretKey: secretKey,
     nonce: nonce,
     onMac: onMac,
+    aad: aad,
   );
 }
 
@@ -59,6 +61,7 @@ Stream<List<int>> decryptChacha20({
   required List<int> nonce,
   required FutureOr<Mac> mac,
   required Stream<List<int>> inputStream,
+  List<int> aad = const [],
 }) {
   final cipher = Chacha20.poly1305Aead();
 
@@ -69,5 +72,6 @@ Stream<List<int>> decryptChacha20({
     secretKey: secretKey,
     nonce: nonce,
     mac: mac,
+    aad: aad,
   );
 }
