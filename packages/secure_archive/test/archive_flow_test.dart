@@ -229,6 +229,39 @@ void main() {
     },
   );
 
+  test('extract tar into a destination reached via a symlink', () async {
+    if (Platform.isWindows) {
+      return;
+    }
+
+    await withIntermediateDirectory((workspaceDir) async {
+      final realDir = Directory(p.join(workspaceDir.path, 'real'));
+      await realDir.create(recursive: true);
+      final linkedDestination = p.join(workspaceDir.path, 'linked');
+      await Link(linkedDestination).create(realDir.path);
+
+      const contents = 'hello';
+      final tarStream = Stream<TarEntry>.fromIterable([
+        TarEntry(
+          TarHeader(
+            name: 'file.txt',
+            typeFlag: TypeFlag.reg,
+            mode: 420,
+            size: contents.length,
+          ),
+          _textContents(contents),
+        ),
+      ]).transform(tarWriter);
+
+      await extractTar(tarStream, linkedDestination);
+
+      expect(
+        await File(p.join(realDir.path, 'file.txt')).readAsString(),
+        contents,
+      );
+    });
+  });
+
   test('test integrity', () async {
     final sourceDir = Directory(
       p.join(Directory.current.path, './test/fixtures'),

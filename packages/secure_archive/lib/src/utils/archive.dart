@@ -166,8 +166,12 @@ Stream<Stream<TarEntry>> splitTarEntriesBySize(
 Future<void> extractTar(Stream<List<int>> stream, String destination) async {
   // log.fine('Extracting .tar stream to $destination.');
 
+  // Resolve symlinks in the destination once so the per-entry
+  // `canonicalize()` checks below compare against the same canonical form.
+  // On Android, `/data/user/0/<pkg>` is a symlink to `/data/data/<pkg>`;
+  // without this, every entry would be rejected as "Invalid tar entry".
   // ignore: parameter_assignments
-  destination = p.absolute(destination);
+  destination = canonicalize(destination);
   final reader = TarReader(stream);
   final paths = <String>{};
   while (await reader.moveNext()) {
